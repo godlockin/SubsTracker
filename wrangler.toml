@@ -16,8 +16,8 @@ preview_id = "your-preview-kv-namespace-id"
 id = "a7486d54d80b465382b2f867ec5ed152"
 
 # 定时任务配置 - 每天早上8点检查
-#[triggers]
-#crons = ["0 8 * * * ?"]
+[triggers]
+crons = ["0 8 * * *"]
 
 # 环境变量（可选，也可以在 Cloudflare Dashboard 中设置）
 [vars]
