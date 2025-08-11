@@ -2635,10 +2635,51 @@ const api = {
             );
           }
 
+          // 防止循环调用检测
+          const userAgent = request.headers.get('User-Agent') || '';
+          const xLoopHeader = request.headers.get('X-Loop-Guard') || '';
+          const referer = request.headers.get('Referer') || '';
+          const requestUrl = new URL(request.url);
+          
+          // 检测自我调用标识
+          if (xLoopHeader === 'SubsTracker-Worker' || 
+              userAgent.includes('Cloudflare-Worker') ||
+              referer.includes(requestUrl.hostname)) {
+            console.log('[第三方API] 检测到潜在循环调用，拒绝处理');
+            return new Response(
+              JSON.stringify({ 
+                message: '拒绝循环调用',
+                response: {
+                  errcode: 2,
+                  errmsg: 'Loop call detected'
+                }
+              }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+
           const config = await getConfig(env);
 
-          // 使用多渠道发送通知
-          await sendNotificationToAllChannels(title, content, config, '[第三方API]');
+          // 验证通知验证码（如果已配置）
+          if (config.NOTIFY_VERIFICATION_CODE && code !== config.NOTIFY_VERIFICATION_CODE) {
+            console.log('[第三方API] 验证码不匹配');
+            return new Response(
+              JSON.stringify({ 
+                message: '验证码不匹配',
+                response: {
+                  errcode: 3,
+                  errmsg: 'Invalid verification code'
+                }
+              }),
+              { status: 403, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+
+          // 使用多渠道发送通知，传递请求信息用于防循环
+          await sendNotificationToAllChannels(title, content, config, '[第三方API]', {
+            originalUrl: request.url,
+            userAgent: userAgent
+          }, env);
 
           return new Response(
             JSON.stringify({
@@ -2675,6 +2716,40 @@ const api = {
 };
 
 // 工具函数
+
+/**
+ * 检测是否为循环调用
+ * @param {Request} request - 请求对象
+ * @returns {boolean} - 是否为循环调用
+ */
+function detectLoopCall(request) {
+  const userAgent = request.headers.get('User-Agent') || '';
+  const xLoopHeader = request.headers.get('X-Loop-Guard') || '';
+  const referer = request.headers.get('Referer') || '';
+  const requestUrl = new URL(request.url);
+  
+  // 检测自我调用标识
+  return xLoopHeader === 'SubsTracker-Worker' || 
+         userAgent.includes('Cloudflare-Worker') ||
+         referer.includes(requestUrl.hostname);
+}
+
+/**
+ * 创建防循环调用的请求头
+ * @param {Object} originalRequestInfo - 原始请求信息
+ * @returns {Object} - 包含防循环标识的请求头
+ */
+function createLoopPreventionHeaders(originalRequestInfo = {}) {
+  return {
+    'X-Loop-Guard': 'SubsTracker-Worker',
+    'User-Agent': 'SubsTracker-Worker/1.0',
+    'X-Original-Request': JSON.stringify({
+      url: originalRequestInfo.originalUrl || '',
+      userAgent: originalRequestInfo.userAgent || ''
+    })
+  };
+}
+
 function generateRandomSecret() {
   // 生成一个64字符的随机密钥
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
@@ -2728,7 +2803,8 @@ async function getConfig(env) {
       EMAIL_FROM: config.EMAIL_FROM || '',
       EMAIL_FROM_NAME: config.EMAIL_FROM_NAME || '',
       EMAIL_TO: config.EMAIL_TO || '',
-      ENABLED_NOTIFIERS: config.ENABLED_NOTIFIERS || ['notifyx']
+      ENABLED_NOTIFIERS: config.ENABLED_NOTIFIERS || ['notifyx'],
+      NOTIFY_VERIFICATION_CODE: config.NOTIFY_VERIFICATION_CODE || ''
     };
 
     console.log('[配置] 最终配置用户名:', finalConfig.ADMIN_USERNAME);
@@ -3031,7 +3107,7 @@ async function testSingleSubscriptionNotification(id, env) {
     const commonContent = `**订阅详情**:\n- **类型**: ${subscription.customType || '其他'}\n- **到期日**: ${formatBeijingTime(new Date(subscription.expiryDate), 'date')}${lunarExpiryText}\n- **备注**: ${subscription.notes || '无'}`;
 
     // 使用多渠道发送
-    await sendNotificationToAllChannels(title, commonContent, config, '[手动测试]');
+    await sendNotificationToAllChannels(title, commonContent, config, '[手动测试]', {}, env);
 
     return { success: true, message: '测试通知已发送到所有启用的渠道' };
 
@@ -3041,7 +3117,7 @@ async function testSingleSubscriptionNotification(id, env) {
   }
 }
 
-async function sendWebhookNotification(title, content, config) {
+async function sendWebhookNotification(title, content, config, env = null, options = {}) {
   try {
     if (!config.WEBHOOK_URL) {
       console.error('[企业微信应用通知] 通知未配置，缺少URL');
@@ -3053,6 +3129,20 @@ async function sendWebhookNotification(title, content, config) {
     const timestamp = formatBeijingTime(new Date(), 'datetime');
     let requestBody;
     let headers = { 'Content-Type': 'application/json' };
+
+    // 处理防循环调用的请求头
+    if (options.originalRequestInfo) {
+      const loopPreventionHeaders = createLoopPreventionHeaders(options.originalRequestInfo);
+      headers = { ...headers, ...loopPreventionHeaders };
+    }
+
+    // 处理去重功能
+    if (env && config.JWT_SECRET) {
+      const dedupPayload = JSON.stringify({ title, content, url: config.WEBHOOK_URL, timestamp: Math.floor(Date.now() / 60000) }); // 1分钟内相同内容去重
+      const dedupHash = await CryptoJS.HmacSHA256(dedupPayload, config.JWT_SECRET);
+      headers['X-Dedup-Id'] = dedupHash;
+      headers['X-Notify-Source'] = 'SubsTracker';
+    }
 
     // 处理自定义请求头
     if (config.WEBHOOK_HEADERS) {
@@ -3189,7 +3279,7 @@ async function sendWechatBotNotification(title, content, config) {
   }
 }
 
-async function sendNotificationToAllChannels(title, commonContent, config, logPrefix = '[定时任务]') {
+async function sendNotificationToAllChannels(title, commonContent, config, logPrefix = '[定时任务]', options = {}, env = null) {
     if (!config.ENABLED_NOTIFIERS || config.ENABLED_NOTIFIERS.length === 0) {
         console.log(`${logPrefix} 未启用任何通知渠道。`);
         return;
@@ -3207,7 +3297,7 @@ async function sendNotificationToAllChannels(title, commonContent, config, logPr
     }
     if (config.ENABLED_NOTIFIERS.includes('webhook')) {
         const webhookContent = commonContent.replace(/(\**|\*|##|#|`)/g, '');
-        const success = await sendWebhookNotification(title, webhookContent, config);
+        const success = await sendWebhookNotification(title, webhookContent, config, env, options);
         console.log(`${logPrefix} 发送企业微信应用通知 ${success ? '成功' : '失败'}`);
     }
     if (config.ENABLED_NOTIFIERS.includes('wechatbot')) {
@@ -3550,7 +3640,7 @@ for (const subscription of subscriptions) {
       }
 
       const title = '订阅到期提醒';
-      await sendNotificationToAllChannels(title, commonContent, config, '[定时任务]');
+      await sendNotificationToAllChannels(title, commonContent, config, '[定时任务]', {}, env);
     }
   } catch (error) {
     console.error('[定时任务] 检查即将到期的订阅失败:', error);
