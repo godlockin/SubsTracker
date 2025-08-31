@@ -24,7 +24,7 @@ jobs:
       # 步骤 2: 运行同步 action
       - name: Sync upstream changes
         id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v4 # 推荐使用更新的版本
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1 # 推荐使用更新的版本
         with:
           # 上游仓库和分支
           upstream_repo: wangwangit/SubsTracker
