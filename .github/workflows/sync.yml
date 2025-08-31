@@ -15,26 +15,34 @@ jobs:
     if: ${{ github.event.repository.fork }}
 
     steps:
-      # Step 1: run a standard checkout action
+      # 步骤 1: 检出您的仓库，确保检出的是正确的分支（这里假设是 main）
       - name: Checkout target repo
         uses: actions/checkout@v4
+        with:
+          ref: main # 明确指定要检出的分支
 
-      # Step 2: run the sync action
+      # 步骤 2: 运行同步 action
       - name: Sync upstream changes
         id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
+        uses: aormsby/Fork-Sync-With-Upstream-action@v4 # 推荐使用更新的版本
         with:
-          upstream_sync_repo: wangwangit/SubsTracker
-          upstream_sync_branch: master
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
-          upstream_pull_args: '--allow-unrelated-histories --strategy=ours'
-          git_log_format_option: '--oneline'
-          git_push_args: '--no-verify'
-          git_commit_args: '--no-verify'
+          # 上游仓库和分支
+          upstream_repo: wangwangit/SubsTracker
+          upstream_branch: master
+          
+          # 您的仓库（目标仓库）和分支
+          target_branch: main
+          target_token: ${{ secrets.GITHUB_TOKEN }}
+          
+          # 其他参数
+          # 注意：参数名已经根据新版本进行了调整
+          pull_args: --allow-unrelated-histories --strategy=ours
+          push_args: --no-verify # 将原 git_push_args 的值赋给 push_args
+          # git_commit_args 通常不需要特殊设置
+          # git_log_format_option 已被移除，可以不设置
 
       - name: Sync check
         if: failure()
         run: |
-          echo "[Error] Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork."
+          echo "[Error] Workflow failed. Please check the logs for details."
           exit 1
