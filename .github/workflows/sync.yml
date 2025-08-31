@@ -31,7 +31,7 @@ jobs:
           upstream_branch: master
           
           # 您的仓库（目标仓库）和分支
-          target_branch: main
+          target_branch: master
           target_token: ${{ secrets.GITHUB_TOKEN }}
           
           # 其他参数
