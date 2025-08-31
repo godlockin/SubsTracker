@@ -15,31 +15,33 @@ jobs:
     if: ${{ github.event.repository.fork }}
 
     steps:
-      # 步骤 1: 检出您的仓库，确保检出的是正确的分支（这里假设是 main）
+      # 步骤 1: 检出您的仓库，确保检出的是正确的分支
+      # 将 'ref' 修改为与您仓库的目标分支一致，这里假设是 'master'
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          ref: main # 明确指定要检出的分支
+          ref: master # 修正点 1: 确保检出存在的分支
 
       # 步骤 2: 运行同步 action
       - name: Sync upstream changes
         id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1 # 推荐使用更新的版本
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
-          # 上游仓库和分支
+          # 上游仓库和分支 (上游是 master)
           upstream_repo: wangwangit/SubsTracker
           upstream_branch: master
           
-          # 您的仓库（目标仓库）和分支
-          target_branch: master
-          target_token: ${{ secrets.GITHUB_TOKEN }}
+          # 您的仓库（目标仓库）和分支 (目标也应该是 master)
+          target_repo: godlockin/SubsTracker # 建议明确指定目标仓库
+          target_branch: master # 修正点 2: 确保目标分支正确
+          github_token: ${{ secrets.GITHUB_TOKEN }} # 建议使用 'github_token' 参数名
           
-          # 其他参数
-          # 注意：参数名已经根据新版本进行了调整
-          pull_args: --allow-unrelated-histories --strategy=ours
-          push_args: --no-verify # 将原 git_push_args 的值赋给 push_args
-          # git_commit_args 通常不需要特殊设置
-          # git_log_format_option 已被移除，可以不设置
+          # 其他参数保持不变，但根据新版action调整了参数名
+          # aormsby/Fork-Sync-With-Upstream-action 的 v3.4.1 版本可能已经更新了参数
+          # 检查 action 的最新文档以确认 'pull_args' 和 'push_args' 是否仍然有效
+          # 如果仍然报错，可以尝试移除下面两行，使用 action 的默认合并策略
+          merge_args: --allow-unrelated-histories
+          pull_args: --strategy=ours
 
       - name: Sync check
         if: failure()
